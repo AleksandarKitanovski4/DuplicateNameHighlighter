@@ -2,10 +2,9 @@ modules = ["python-3.11"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "scrot", "tcl", "tesseract", "tk", "xvfb-run", "zlib", "gcc", "glibc"]
+packages = ["freetype", "gcc", "glibc", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "scrot", "tcl", "tesseract", "tk", "xvfb-run", "zlib"]
 
 [workflows]
-runButton = "Project"
 
 [[workflows.workflow]]
 name = "Project"
