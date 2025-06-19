@@ -1,0 +1,64 @@
+modules = ["python-3.11"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "scrot", "tcl", "tesseract", "tk", "xvfb-run", "zlib", "gcc", "glibc"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Duplicate Name Highlighter"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "OCR Demo"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Simple OCR Demo"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Text Demo"
+
+[[workflows.workflow]]
+name = "Duplicate Name Highlighter"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "export QT_QPA_PLATFORM=offscreen && python main.py"
+
+[[workflows.workflow]]
+name = "OCR Demo"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python demo.py"
+
+[[workflows.workflow]]
+name = "Simple OCR Demo"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python simple_demo.py"
+
+[[workflows.workflow]]
+name = "Text Demo"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python text_demo.py"
+
+[deployment]
+run = ["sh", "-c", "export QT_QPA_PLATFORM=offscreen && python main.py"]
