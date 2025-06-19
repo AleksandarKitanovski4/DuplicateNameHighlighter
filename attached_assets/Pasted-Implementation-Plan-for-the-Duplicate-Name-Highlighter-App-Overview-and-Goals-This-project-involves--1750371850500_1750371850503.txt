@@ -1,0 +1,247 @@
+Implementation Plan for the Duplicate Name Highlighter App
+Overview and Goals
+This project involves creating a Windows desktop application that monitors a user-defined screen region for text (specifically names) and highlights any duplicate names that appear more than once during a session. Key objectives include real-time OCR scanning of a selected screen area, identifying repeated names across scans, and overlaying transparent markers over those duplicates on the screen. The application must run completely offline, be lightweight (minimal CPU/RAM usage), and provide an intuitive GUI for configuration. Below is a detailed plan breaking down the required features, recommended technologies, UI design, and performance considerations, followed by a final AI-ready prompt for code generation.
+Functional Requirements Breakdown
+To ensure clarity, we outline how each requirement will be handled:
+Screen Region Monitoring: The user can select a specific region of the screen to watch. The app will periodically capture screenshots of that region. It will detect changes in the region’s content (using image hashing or pixel differencing) to decide when to run OCR. This avoids unnecessary processing when the screen hasn’t changed.
+OCR Name Extraction: An offline OCR engine (Tesseract via PyTesseract) will process each screenshot to extract text. We will retrieve both the recognized text and its on-screen coordinates (bounding boxes) for highlighting. Using pytesseract.image_to_data() provides each word’s text and its bounding box (x, y, width, height in the image)
+stackoverflow.com
+, which is ideal for mapping names to screen positions.
+Duplicate Name Tracking: The app maintains an in-memory list (or set) of all names seen so far in the session, as well as logs them in a SQLite database. When a new scan finds names that were seen before (duplicates), those names will be flagged for highlighting. Session memory can be reset via the GUI, and the database can be cleared if needed (with user confirmation).
+Transparent Overlay with Markers: Detected duplicate names will be indicated by floating semi-transparent markers (e.g. colored dots or circles) drawn on an always-on-top overlay window. This overlay has no visible background (fully transparent) so that only the markers are visible on screen. The overlay window will be click-through (not intercepting mouse events) so that it doesn’t block interaction with underlying applications. The markers should appear at the exact screen positions of the duplicate names and ideally move if the content scrolls.
+Minimal GUI for Controls: A small configuration window will allow the user to:
+Toggle Auto-Scan on/off.
+Set the scan interval (in seconds).
+Define or change the screen region to monitor.
+Reset the current session’s memory of seen names.
+Clear the database (with a confirmation dialog).
+(Optional) Manually trigger a scan, especially if auto-scan is off or to force a scan when content hasn’t changed.
+The GUI should be simple, clearly labeled, and intuitive. All settings changes are saved to a local settings.json so they persist across restarts. Settings are loaded on startup to restore the last used configuration.
+Scanning Logic & Accuracy: The app will optimize scanning to avoid false duplicate alerts:
+It uses image difference checks (like perceptual hash comparisons or SSIM) to skip OCR when the region content hasn’t changed significantly. If two consecutive screenshots are nearly identical (difference below a threshold), OCR can be skipped to save processing.
+It mitigates false duplicates caused by partial scroll overlaps. For example, if the user scrolls a list and some names from the previous view are still visible, the app should recognize those are not “new” occurrences. We will do this by tracking context, e.g., remembering the last visible name (or last few names) from the previous scan and not counting them as new duplicates if they appear again immediately at the boundary of a scroll.
+The app can auto-detect scrolling. If a scroll is detected (via image changes or optional hook into scroll events), it can trigger an immediate scan (overriding the timer) to update highlights in real-time as content moves. Conversely, if no change (no scroll or content update) is detected, the app might skip or delay scans to reduce load.
+Manual scan is allowed at any time (e.g., a “Scan Now” button). If the user triggers a manual scan but the content hasn’t changed since the last scan, the app can provide a brief feedback (such as a status message “No change detected since last scan”) to inform the user that nothing new was found.
+Offline Operation: The entire solution will run offline. Tesseract OCR will be installed locally and used via PyTesseract, so no internet connection is required for OCR. All data (names, settings, logs) is stored locally (in memory, JSON, or SQLite DB). No external online APIs or services are needed.
+Performance: The application should be as lightweight as possible:
+Efficient region capture (using fast screenshot methods or direct Win32 APIs).
+Minimal OCR frequency (driven by change detection).
+Use of optimized libraries (like using Pillow/PyAutoGUI for grabbing screenshots quickly, OpenCV for image processing if needed).
+Running heavy tasks in background threads so the GUI remains responsive.
+Proper resource management (releasing screenshot resources, not leaking memory).
+The UI and overlay should update smoothly to give real-time feedback (e.g., highlighting appears shortly after a name reappears).
+Optional Enhancements: The plan also allows for some bonus features if time permits:
+Color-coded markers: e.g. the first time a name is found to be a duplicate, use orange; if the same name appears yet again (multiple occurrences), use red for subsequent instances. This gives a visual indication of how frequently a name has reappeared.
+Logging each scan’s results with timestamps (possibly writing to a log file or the database), which could help in debugging or reviewing when and where duplicates occurred.
+An “Export to CSV” feature to dump all scanned names or just duplicates with metadata (timestamp, number of occurrences, etc.) from the SQLite database.
+Light/Dark mode for markers: If the user’s background content is dark or light, the marker style could be toggled (e.g., use lighter colored outlines on dark backgrounds or vice versa) to ensure visibility. This could be a simple setting in the GUI.
+With the requirements understood, the next sections detail how to implement these features modularly and effectively.
+System Architecture & Modular Breakdown
+The application will be structured into several components for clarity and maintainability:
+Screen Region Selection Module: Responsible for letting the user define the area of the screen to monitor. We have two possible approaches:
+Interactive Drag Selection (Graphical): Implement a mode where the user can drag a rectangle on the screen to select the region. This can be done by creating a temporary full-screen transparent window that captures mouse events to get the rectangle coordinates. On Windows, one approach is to use the Win32 API via pywin32 to capture global mouse events and draw a rectangle (using methods like DrawFocusRect() for XOR drawing
+stackoverflow.com
+stackoverflow.com
+). However, this is fairly low-level. A simpler approach with a GUI framework (like PyQt) is to open a frameless, translucent window that covers the screen and track mouse press/drag/release to get the region. In PyQt, for instance, one could use a custom widget overlay for region selection.
+Point-and-Click Input (Text/Console): Alternatively, use a quick method via PyAutoGUI or similar: e.g., ask the user to move the mouse to the top-left corner of the desired region and press a key, then to the bottom-right and press a key. Using pyautogui.position() to read coordinates when the user signals is straightforward
+reddit.com
+. This approach is simpler but less elegant from a UI perspective. Given the requirement for an intuitive GUI, the drag selection is preferable.
+Once the region is obtained, store the coordinates (x, y, width, height) in the settings. This region will be used for all subsequent screenshots. The GUI’s “Define Region” button will trigger this module.
+Screenshot Capture & Change Detection Module: This handles periodically capturing the region and checking if the image has changed:
+Use PyAutoGUI’s screenshot() function with the region tuple to grab just that area of the screen. PyAutoGUI, which uses Pillow under the hood, can capture a region by providing region=(x, y, width, height)
+pyautogui.readthedocs.io
+. This is usually quite fast (on the order of 100 ms for full HD screen
+pyautogui.readthedocs.io
+, likely faster for a smaller region).
+After capturing an image, determine if it’s significantly different from the last image:
+Use perceptual image hashing (e.g., the imagehash library). Compute a hash (like average hash) of the new screenshot and compare it to the hash of the last screenshot. If the Hamming distance between hashes is 0 or very low, the images are essentially the same
+pythonhow.com
+, so we can skip OCR this cycle. If the hash difference exceeds a small threshold, that indicates a change in content
+pythonhow.com
+ and we proceed to OCR.
+Alternatively, use OpenCV’s SSIM (Structural Similarity Index) via scikit-image to get a similarity score between images. SSIM = 1 means identical images, and lower values mean changes
+blog.ldtalentwork.com
+. This could be used to decide a threshold (for instance, if SSIM > 0.99, skip OCR as only trivial changes occurred). However, SSIM might be overkill if imagehash works well. We will choose image hashing for simplicity and speed.
+If a scrolling offset can be deduced (optional advanced step): If the new image is largely the old image shifted (which is typical when scrolling content), we could detect the vertical offset by correlating the two images. One simple heuristic: if the last text from the previous scan appears near the top of the new scan (meaning the user scrolled down), we can compute how far down the content moved. This offset can be used to smoothly move existing markers until OCR updates (for a more fluid UI) or at least to know which names in the new image are just carry-overs. However, implementing full image correlation might not be necessary for correctness; we can rely on the OCR text overlap method:
+Keep the last few names from the bottom of the previous scan. After a new scan, check if those names appear at the top of the new scan. If so, treat those as continued content, not new duplicates.
+Similarly, if scrolling up, names from the top of the previous scan might appear at bottom of new (less common but possible).
+Whenever a significant change is detected, trigger the OCR module; otherwise, wait until next interval. The scan interval (in seconds) is configurable via the GUI. A shorter interval gives more responsiveness but higher CPU usage; a longer interval is lighter but might miss quick changes. We’ll default it to a moderate value (e.g., 2–5 seconds) and allow user adjustment.
+OCR Text Extraction Module: This is where PyTesseract is used to extract text (names) and their positions from the screenshot:
+We will use pytesseract.image_to_data(image, output_type=Output.DICT) which returns details for each word
+stackoverflow.com
+. Each word entry includes its text (d['text'][i]), confidence, and bounding box (left, top, width, height).
+By iterating over the words with sufficient confidence (ignoring OCR noise or very low-confidence text), we collect all potential names in the region. (Here we assume any word could be a name – if we needed to filter actual names vs other text, that’s domain-specific and not specified, so we treat all words as candidates for duplicate checking.)
+We obtain the screen coordinates for each word’s bounding box. Note: PyTesseract gives coordinates relative to the image’s origin. Since our image is a region of the screen, we know the region’s top-left screen coordinates (x0, y0). If the overlay window is positioned at the same (x0, y0), we can draw at image-relative coordinates directly. If the overlay covers the whole screen, we’d need to offset each box by (x0, y0) to get global screen positions.
+Efficiency considerations: We ensure Tesseract is configured for speed:
+We might set lang='eng' (assuming names are in English alphabet) and possibly a whitelist of characters (A-Z, a-z, 0-9) to reduce confusion, though Tesseract’s default is fine for general text.
+Use appropriate Page Segmentation Mode (PSM). If we expect the region to contain a list of names (like a column of text), a suitable PSM (e.g., treating image as a single column or block of text) could improve results. For simplicity, PSM 6 (Assume a single uniform block of text) or 3 (fully automatic) are common defaults.
+Convert the screenshot to grayscale and possibly apply slight preprocessing (like a binary threshold or increase contrast) before OCR to improve accuracy if needed.
+The output of this module is a list of detected names with their bounding boxes for the current screenshot.
+Duplicate Detection & Data Management Module: This part compares the newly extracted names against those seen previously:
+Maintain an in-memory set (or dictionary) of names seen so far in the session (since last reset). When new OCR results come in, iterate through each name:
+If the name is not in the seen set, add it to the set (and also store in the database with a timestamp and perhaps initial position) but do not mark it on the overlay (it’s the first time seeing it, so not a “duplicate” yet).
+If the name is already in the seen set, then we have found a duplicate occurrence. This name (at its specific position in the current image) should be flagged for highlighting. (We may also update the database record for this name to note an additional occurrence or update a counter, etc.)
+Use a SQLite database for persistent storage and logging:
+Design a simple schema, e.g., a table NamesSeen(name TEXT PRIMARY KEY, first_seen TIMESTAMP, count INTEGER, last_seen TIMESTAMP, last_position TEXT). Each unique name gets an entry the first time it’s seen. A separate table or log table can record each occurrence if detailed logging is desired (e.g., NameOccurrences(name TEXT, timestamp DATETIME, position TEXT) for every instance found).
+The database file can be something like names.db in the app directory. Use Python’s built-in sqlite3 module to interact. All operations are local and fast for the relatively small number of entries expected (even a few thousand names is trivial for SQLite).
+Provide functions to reset and clear data:
+“Reset session memory” in the GUI will clear the in-memory set and perhaps start a new session context (we might keep the DB but could separate session ID if logging occurrences).
+“Delete database” will actually delete or reinitialize the SQLite file (after asking the user to confirm). This wipes all historical records of seen names.
+Note: To avoid false duplicates on partial scroll, incorporate logic here: if a name was on the edge of the last screen and appears again immediately due to scroll, we might want to ignore that second occurrence. A strategy:
+Keep track of names that were visible in the previous scan’s overlap region (for instance, if the user scrolls down, the names from bottom of previous image likely appear at top of new image). If we detect such an overlap, we can choose not to count those as “new” duplicates because they are the same instances still on screen. This requires comparing current names’ positions to previous ones: if the same exact name appears in a different position but the shift is consistent with a scroll, it might be an overlapped element. This is a tricky edge case and might be acceptable to simplify (since the highlight in that case would disappear on reset anyway). But for thoroughness, we mention it and could handle by tracking last screen’s bottom names as discussed earlier.
+This module essentially decides which names need highlighting on each scan and passes those (with coordinates) to the overlay module.
+Overlay Rendering Module: Handles creation of the transparent overlay window and drawing markers:
+We will use PyQt5 (or PyQt6) to create an overlay window because it provides fine control over window attributes for transparency and always-on-top behavior. Key steps to set up the overlay:
+Create a QWidget or QMainWindow for the overlay. Set window flags to make it frameless and always on top: window.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool). The Qt.Tool flag (or Qt.Dialog) helps to keep it out of the taskbar if desired.
+Make the background transparent with window.setAttribute(Qt.WA_TranslucentBackground). This ensures anything not explicitly painted is see-through.
+Make the window click-through so it doesn’t eat mouse/keyboard events: in Qt5/6, setting Qt.WA_TransparentForMouseEvents on the widget should accomplish this (though in Qt5 this attribute on a top-level window internally sets the window as transparent to input)
+forum.qt.io
+forum.qt.io
+. This allows users to scroll or click in the underlying window through our overlay. We have to set this attribute before or right after showing the window to ensure it takes effect. An alternative, as noted in some Qt discussions, is using the native Windows API to set the layered window style with WS_EX_TRANSPARENT – but Qt’s attribute is a convenient wrapper.
+Position and size the overlay: we have two choices:
+Cover only the region: Set the overlay window’s geometry to the chosen region (x0, y0, width, height). This way, coordinates from OCR (which are relative to the screenshot) can be used directly for drawing. This is efficient and avoids drawing outside the needed area. However, if the user scrolls content within that area, the overlay remains correct (since it’s tied to that screen region).
+Cover the full screen: Alternatively, make the overlay full-screen. Then we must offset all draw positions by the region’s top-left corner. Covering full screen isn’t necessary here and could use more resources, so the first approach is preferable.
+Implement the paintEvent (for a QWidget) or use a QPainter on the overlay to draw markers. The markers can be small semi-transparent circles or dots:
+Choose a color scheme: for example, orange for first-time duplicate, red for subsequent duplicates. These can be defined as QColors with some alpha for transparency (e.g., QColor(255, 165, 0, 128) for semi-transparent orange).
+For each name to highlight, take its bounding box coordinates (x, y, width, height). We might draw a small filled circle or an outline at the center of that box, or perhaps draw a semi-transparent highlight rectangle around the word. A simple choice is a dot: draw a circle of fixed radius (say 5-10 px) at the midpoint of the word’s rectangle, or perhaps a colored underline below the word’s bounding box.
+Drawing routine: in paintEvent, instantiate QPainter, set it to draw with anti-aliasing, set brush color with desired transparency, then for each coordinate draw the shape. After drawing all markers, end the painter.
+Because the overlay is always on top and transparent, the user will see these markers superimposed on the original application where the text is.
+Marker movement with scroll: If the user scrolls, ideally the markers should move exactly with the text. This will naturally happen after the next scan when we recalc positions. If we want instant movement as scrolling happens (without waiting for next OCR), that would require detecting the scroll offset in real-time, which is complex. Instead, our plan is to keep scan intervals short when auto-scanning so that after a scroll, within a second or two the OCR runs again and updates marker positions. This provides near-real-time effect. We will note that a possible enhancement is to detect scroll offset and adjust the overlay in between scans (e.g., by moving the overlay window or translating marker positions temporarily), but that is advanced. Initially, rely on fast rescans to update marker placement.
+The overlay module should provide a method to update the list of markers (duplicate coordinates) that need drawing, and then call overlay.update() (which triggers paintEvent) to redraw them. This will be invoked each time after a scan identifies duplicates. The overlay should only display duplicates from the latest scan (since presumably if a name scrolled off screen it’s no longer highlighted — we highlight what’s currently visible and duplicated in the session).
+GUI Control Panel Module: This is the main window (distinct from the overlay) where users configure and control the app:
+Technology: This can be built with PyQt as well (since we are already using PyQt for overlay, we can use it for the GUI to avoid mixing GUI frameworks). Alternatively, one could use tkinter for the simple controls, but integrating tkinter with a PyQt overlay would complicate things. So we will use PyQt for both the overlay and the control panel, possibly as separate top-level windows.
+The control panel will have the following UI elements:
+Auto-Scan Toggle: This could be a QCheckBox or a toggle switch. When enabled, the scanning thread/timer runs periodically. When disabled, automatic scanning stops (but manual scans can still be triggered).
+Scan Interval Input: A QSpinBox or QLineEdit where the user can enter the interval in seconds. We’ll enforce a reasonable min (e.g., 1 second) and perhaps max (e.g., 60 seconds) to prevent extremes. If using a QSpinBox, we can set increment steps and a default (e.g., 5 sec).
+Define Region Button: Opens the region selection workflow (as described in module 1). After the user defines the region, show some confirmation (like the coordinates or highlight the chosen area briefly) and save it.
+Reset Session Button: When clicked, it clears the in-memory seen-names set and also any temporary list of duplicates. This means all names will be treated as “new” if seen again. We should also clear any highlights currently on the overlay (so probably also command the overlay to clear markers). The database logging could continue to accumulate, but for session purposes this starts fresh.
+Clear Database Button: This button will wipe all historical data. We’ll implement it by closing the SQLite connection (if any), deleting or truncating the database file, and then re-initializing a fresh database (or simply dropping the tables). Because this is destructive, we’ll pop up a confirmation dialog (“Are you sure you want to delete all stored data?”).
+(Optional) Manual Scan Button: If auto-scan is off or even on, a “Scan Now” button can force an immediate scan. This is useful for manual control. After pressing it, the app should capture and OCR regardless of the timer. If no changes were found (image identical to last scan), perhaps display a brief status message like “No new content to scan” so the user knows the action took place.
+Status Display: A small status text line to show what’s happening (e.g., “Last scan: 10:30:05 – 2 duplicates found”, or “Auto-scan paused”). This keeps the user informed. We can update it after each scan or major action.
+Layout: Because the UI is minimal, a simple vertical layout of these controls in a small window is sufficient. For example:
+Row 1: [Auto-Scan □] [Scan Interval: ___ sec]
+Row 2: [Define Region] [Reset Session]
+Row 3: [Clear Database] [Scan Now (if included)]
+Row 4: [Status Label…]
+Make sure this window is always on top of other windows? Possibly not necessary – the overlay is always on top by design, but the control window can be a normal window (perhaps with topmost flag as well so it stays above the content if user wants to see it). However, users might minimize it. We can allow it to minimize to tray or taskbar but keep running. Up to design; we’ll assume it can just float and user can alt-tab back to it.
+Persist settings: Use Python’s json module to write a settings.json whenever a setting is changed (or on app exit). This includes: last region coordinates, last interval, auto-scan on/off state, perhaps last chosen marker colors or any optional setting. On startup, read this file and apply settings (e.g., auto-scan if it was on, set interval, etc., and perhaps automatically start the scanning thread if auto-scan was on).
+Background Worker Thread(s): To keep the UI responsive, the main thread (which runs the PyQt event loop) should not be bogged down with OCR or image processing. We will implement the scanning loop in a separate thread or use QTimer with asynchronous approach:
+One approach: Use a QThread for the scanner. The QThread can run an infinite loop (with sleep equal to scan interval) or use a QTimer in that thread’s event loop to periodically trigger capture->OCR. Whenever a result is ready, it can emit a Qt signal with the new data (duplicate markers) to the main thread, where a slot will update the overlay.
+Alternatively, use the main thread’s QTimer to trigger a worker function, but immediately offload heavy work using concurrent.futures.ThreadPoolExecutor or Python threading. For example, on each timeout, if not already scanning, start a worker that does capture & OCR, then callback to update UI. This avoids manually managing a persistent thread.
+The thread needs access to the region coordinates, current settings, and so on. Proper locking or synchronization might be needed if settings can change mid-run (for instance, if user changes interval, or toggles auto-scan off, we should signal the thread to stop).
+The scanning thread will contain logic integrating modules 2 (capture/change detect), 3 (OCR), and 4 (duplicate check) in sequence for each cycle. If auto-scan is off, the thread should wait or not run; if manual scan is triggered, it runs just once on demand.
+Offline Mode and Dependencies: Ensure all required components are available offline:
+Bundle the Tesseract OCR engine or instruct the user to install it and point pytesseract.pytesseract.tesseract_cmd to the installed binary. Alternatively, include Tesseract binaries with the app installer.
+PyTesseract, PyQt, PyAutoGUI, PIL, etc., are offline libraries – just need to be installed in the Python environment or packaged with the app (possibly using PyInstaller or similar to create an executable).
+No internet calls are made; all OCR and processing is local.
+The database (SQLite) is file-based and local.
+Optional Bonus Features Implementation:
+Marker Color Coding: Maintain a count of how many times each name has appeared (this can be stored in the in-memory dict or in the DB). When drawing markers, decide the color based on the count:
+If count == 2 (this is the first duplicate occurrence, meaning the name was seen once before and now again), use orange.
+If count >= 3 (this name has appeared multiple times already), use red for the marker.
+You could also incorporate other colors for different thresholds if desired (e.g., a very high frequency name).
+Logging: Each scan cycle, prepare a summary of findings (e.g., “timestamp, new names found [list], duplicates found [list]”). Append this to a log text file or insert into a log table in the DB. This can be later reviewed or exported.
+CSV Export: Provide a function (perhaps triggered by a button or menu) to export data. If focusing on duplicates, one could export all names that had count > 1 with their counts and first/last seen times. Or export the log of all scans. Using Python’s csv module to write the SQLite query results to a file is straightforward.
+Light/Dark Mode for Markers: This could be a manual toggle in settings. Implementation could be as simple as having two sets of colors for the markers (one optimized for light backgrounds, one for dark). For example:
+Dark mode markers: use bright colors with white borders or glows for visibility on dark content.
+Light mode markers: use darker or more saturated colors, maybe with a black edge.
+The user can switch mode, and the overlay would repaint with the new style. (Automating detection of background might be possible by sampling underlying pixels where text is, but that’s overkill; a manual toggle is fine.)
+Technology Choices and Rationale
+We choose the following key technologies based on the requirements:
+Programming Language: Python. Python enables rapid development and has a rich ecosystem of libraries for GUI, OCR, image processing, etc. It’s cross-platform, but since we target Windows specifically, we can also interface with Windows APIs when needed.
+OCR Engine: Tesseract via PyTesseract. Tesseract is a robust open-source OCR that runs offline. PyTesseract is a convenient wrapper that gives us Python functions to get recognized text and detailed data (including bounding boxes)
+stackoverflow.com
+. It meets the offline requirement and supports many languages (we likely use English for names).
+Screen Capture and Automation: PyAutoGUI (Pillow). PyAutoGUI is a simple way to capture screenshots of the screen or regions. It uses PIL internally and on Windows it utilizes native screenshot capabilities. We use it because of its simplicity (one line to grab a region)
+pyautogui.readthedocs.io
+. Alternatively, one could use OpenCV (cv2.imread on a special Windows screenshot path, or direct Win32 BitBlt as shown in the Stack Overflow example
+stackoverflow.com
+stackoverflow.com
+). If performance of PyAutoGUI is insufficient, the Win32 approach could be used for faster capture (Direct BitBlt can be very fast). Initially, PyAutoGUI should suffice given moderate intervals.
+GUI Framework: PyQt5/PyQt6. PyQt is chosen for the GUI and overlay because:
+It supports making transparent, always-on-top, click-through windows fairly easily with the right flags (as discussed above).
+It has a rich widget set for building the control panel (buttons, checkboxes, etc.) and a good event system for integrating threads or timers.
+Alternatives: Tkinter is built-in and simpler, but it has limitations:
+Making a truly transparent overlay window in tkinter is non-trivial (would require Win32 calls for layered windows, as tkinter doesn’t natively support per-pixel transparency easily).
+Managing two windows (overlay and control) might be trickier.
+Fewer options for modern-looking UI elements.
+PyGame was mentioned as an option for overlay; while you can create a borderless Pygame window and possibly use SDL flags to make it transparent on Windows, it’s more low-level and primarily for drawing, lacking GUI widgets for controls. Thus, PyQt is a more comprehensive solution for both needs.
+Database: SQLite (via Python’s sqlite3). SQLite is file-based, doesn’t require a server, and is included with Python. It’s perfect for storing our small amount of data (names and logs). It operates offline and is very reliable for this scale of application.
+Image Processing: PIL/Pillow, OpenCV, imagehash: For comparing screenshots, we can either:
+Use imagehash (which depends on PIL) to quickly compute hashes and compare
+pythonhow.com
+.
+Or use OpenCV for more advanced image analysis (like SSIM or template matching for scroll offset). We will likely include OpenCV anyway since PyTesseract can use cv2 images and we might use it for any preprocessing on the screenshots. OpenCV is powerful for any further enhancements (like image diff visualization if we ever needed).
+Note: If minimizing dependencies is a concern, one could do without OpenCV by using PIL for image differences or rely solely on imagehash. But given OpenCV’s utility, we include it.
+Win32 Hooks (optional): If we wanted to detect scroll events or global hotkeys, libraries like PyHook/pynput can be used. The Stack Overflow example used PyHook for mouse events
+stackoverflow.com
+. However, adding such hooks can complicate installation (e.g., PyHook is older and may require compilation). We might avoid hooks and instead rely on image change detection for scroll. If implementing a global hotkey (say to start region selection or to manually trigger scan via keyboard), the keyboard or pynput libraries could be used. This is not strictly required by the spec, so we keep it simple.
+In summary, PyQt will serve as the core framework (for both UI and overlay), PyAutoGUI/PIL for capturing screenshots, PyTesseract/Tesseract for OCR, and standard Python modules (threading, sqlite3, json) for glue logic and data management. These choices ensure the app remains offline and lightweight.
+UI Design and User Experience
+The design philosophy is to keep the UI minimal and user-friendly, since the app largely runs in the background highlighting duplicates.
+Control Panel Appearance: A small window (possibly titled “Duplicate Name Highlighter” or similar) with a simple layout. Use clear labels and possibly tool-tips for each control:
+The Auto-Scan toggle could be labeled “Enable Auto-Scan” (checked = scanning continuously, unchecked = paused).
+The interval input should be next to it, labeled “Interval (s):”.
+Buttons with descriptive text: “Select Region”, “Reset Session”, “Clear Data”, “Scan Now”. If space is tight, shorter labels like “Region…”, “Reset”, “Clear DB”, “Scan” could be used, but clarity is more important than saving a few pixels.
+Consider grouping related items: e.g., Region selection and interval might be considered setup, while reset/clear are maintenance. But given there are few controls, a single column works.
+Defining Region UX: When the user clicks “Select Region”, the app should guide them. For example, the control panel can hide or minimize (so it doesn’t get in the way), then a full-screen translucent overlay appears instructing “Drag to select area” with crosshair cursor. After selection, the rectangle could briefly flash or remain for confirmation, then the overlay closes and the control panel returns. We should also handle cancellation (e.g., hitting ESC to abort region selection).
+Feedback: Provide immediate feedback for user actions:
+After region selection, update the status text to show the coordinates of the selected region.
+After each scan (auto or manual), update the status text: e.g., “Scanned at 14:35:23 – 3 new duplicates highlighted” or “No duplicates found in this scan”.
+When resetting session, maybe change status to “Session reset – clearing seen names.”
+When clearing DB, after confirmation, indicate “All historical data cleared.”
+Overlay Marker Design: The markers should be noticeable but not overly intrusive:
+Semi-transparent circles or rings around the duplicate names. Possibly a small filled circle right next to the text or over it. Alternatively, a translucent highlight over the text itself (like a highlight pen effect) could be used, but that might obscure the text slightly. A small circle or underline is safer to not obscure text.
+Orange vs red color coding as specified for first vs subsequent duplicates helps the user know if this is the first repeat or one of many.
+Size of markers: Keep them small (maybe 10-15 pixel diameter) so they don’t cover large areas of the screen. Just enough to draw attention.
+If light/dark mode toggle is present: in dark mode, maybe use a bright orange/red with a white border or shadow, in light mode use darker borders. But likely a single style (bright semi-transparent colors with a subtle outline) might work on most backgrounds.
+Always-On-Top Behavior: The overlay will always be on top of all windows (that’s necessary to show markers on any app). The control panel might not always be on top, but we could also give it Qt.WindowStaysOnTopHint so it stays above other windows if the user wants to see status while scrolling through another app. This depends on user preference; we could make it optional. We must be careful not to confuse this with the overlay (which definitely should not be hidden by other windows – although if the user covers the monitored region with another window, our overlay would still float on top, which could be weird because it would be highlighting text that’s currently covered. Perhaps we assume the user keeps the region visible in the foreground when using the tool).
+Responsiveness: The GUI operations (buttons, etc.) should respond instantly. Long operations (OCR) are in background, so the user can still click “Pause” (turn off auto-scan) which should signal the thread to stop after current iteration. Use thread-safe flags or signals to handle that.
+Overall, the UI should feel lightweight – just a small toolbar-like window – and the user’s focus will mainly be on the content where duplicates are highlighted, not on the app window itself. The design should make it easy to configure and then get out of the way.
+Performance Considerations and Optimizations
+Performance is critical since the app runs continuously in the background. Here are the strategies to ensure it’s efficient:
+Minimize OCR Frequency: As described, use image difference checks to avoid redundant OCR. Perceptual hashing (like average hash) is extremely fast (on the order of milliseconds) and gives a quick indication of change
+pythonhow.com
+. Only proceed with OCR when a change is detected. This will drastically cut down CPU usage if the screen region is static for periods of time.
+Optimize Screenshot Capture: PyAutoGUI’s region capture is fairly quick (100 ms for full screen, likely far less for a small region)
+pyautogui.readthedocs.io
+. If the region is still somewhat large or if faster capture is needed, consider using the Win32 BitBlt approach (via win32gui/win32ui) to grab pixels directly into a bitmap
+stackoverflow.com
+stackoverflow.com
+. That approach is quite efficient in C/C++ and via pywin32 it should be similar performance. We could test both methods and use the faster. However, for simplicity, start with PyAutoGUI which likely is sufficient for intervals ~1s or more.
+Threading and concurrency: By running OCR in a separate thread, we ensure the GUI never freezes. We will also be careful to not spawn multiple OCR threads if a previous scan is still processing (in case the interval is set very low or OCR takes longer than interval). Possibly disable the timer until the current OCR finishes, or have a flag “isScanning” to skip a cycle if still busy.
+OCR Tuning: Tesseract can be slow on full images, but our region might be relatively small. If the region is large and text is small, one performance tweak is to scale the image down slightly before OCR if high resolution isn’t needed. However, scaling down can hurt accuracy for small fonts. Alternatively, we might crop the image further if we know only part has text (e.g., if the region includes margins or graphics). But without specific info, we assume region is tight around text content.
+Limiting OCR Area via ROI: If we can predict where new text appears (like at bottom when scrolling), one could theoretically OCR only the new portion. This is complex to generalize, so not in initial implementation.
+Data Structures: Using a Python set for the seen names gives average O(1) lookup, so checking duplicates is very fast even for thousands of entries. SQLite operations (for logging) are also very fast for small inserts; to optimize, we could batch commits or use WAL mode, but this likely isn’t necessary. The DB can be set to autocommit or commit every insert since the volume is low.
+Memory Footprint: Storing strings of names and some coordinates is negligible in memory. The images captured for OCR might be the largest memory usage; we should be sure to delete or reuse the image objects promptly each cycle (to avoid piling up many images). If using PIL images via PyAutoGUI, ensure to dereference or overwrite the im variable. If using OpenCV (NumPy arrays), likewise.
+Marker Drawing Performance: The overlay drawing is lightweight (just drawing a few circles). Even if there are, say, 50 duplicates highlighted, drawing 50 small circles each refresh is trivial for Qt’s painting system. We should call update() on the overlay only when needed (after a scan identifies changes) to avoid constant repaint. Qt will handle the actual painting efficiently when the event loop is free.
+Scanning Interval Adjustment: Perhaps allow dynamic interval adjustment: e.g., if no changes seen for a while, one could slow down scanning to save CPU, and if changes are detected frequently (or a scroll is actively happening), temporarily increase frequency. This might be an over-optimization. Instead, the user can set a comfortable interval.
+Resource Cleanup: On exit, ensure to stop the scanning thread cleanly (set a flag and join it, or use QThread’s quit). Also release any handles if using Win32 (though PyAutoGUI handles this internally). Close the SQLite connection. These prevent any resource leaks or locked files.
+By following these optimizations, the app should run quietly in the background with low CPU usage. For instance, if nothing changes, the only cost is taking a screenshot and computing a hash every few seconds, which is very low. When text does change, the OCR will consume some CPU for a fraction of a second (Tesseract’s speed depends on text amount; for moderate text it should handle near real-time). The overlay drawing is negligible overhead. Thus, even on a typical PC, this tool should not cause performance issues for the user’s system.
+Conclusion
+In summary, the application will consist of a main GUI thread (PyQt) for user interaction and overlay display, and a background thread for periodic screen capturing and OCR processing. The components will communicate via thread-safe signals or shared data structures. We will ensure all features (from real-time duplicate highlighting to data persistence and user controls) are implemented in a robust and user-friendly manner. The design emphasized modularity: each part (capture, OCR, duplicate logic, overlay, GUI) can be developed and tested somewhat independently before integration. With this plan, we can now proceed to implementation. The final step is to translate this design into code. Below is an AI-ready prompt summarizing the task for code generation:
+Final AI-Ready Prompt for Code Generation
+plaintext
+Copy
+Edit
+Using Python (preferably PyQt5/PyQt6), develop a Windows desktop application with the following functionality:
+
+- **Select and Monitor a Screen Region:** Provide a way for the user to select a region of the screen (x, y, width, height). Save these coordinates for repeated use. Continuously capture this region (e.g., every N seconds as specified by the user, or immediately when a change is detected).
+- **Detect Screen Changes:** Before running OCR on a new screenshot, compare it to the last screenshot. Use an image hashing method or similar to determine if the content has changed. Only proceed if a change is detected.
+- **OCR for Names:** Utilize Tesseract OCR (via pytesseract) to extract text from the screenshot. Retrieve both the text and bounding box positions for each word. Assume we are interested in words that could be “names” (we won’t filter by content, any word is a candidate).
+- **Duplicate Name Tracking:** Keep an in-memory set of all names seen so far in the current session. Also record them in a SQLite database (with at least the name and a timestamp). On each OCR pass, determine which names from the current image have been seen before (by checking the set/database). Those that are repeats (duplicates) should be highlighted.
+- **Transparent Overlay for Highlighting:** Create a transparent, always-on-top overlay window that draws semi-transparent markers (circles or similar) over the screen region. Ensure this overlay does not intercept clicks (click-through). Draw a marker at the location of each duplicate name’s bounding box. The overlay should update its markers whenever a new duplicate is found or content changes. (Markers should effectively move with scrolling content, by updating after each new scan.)
+- **GUI Control Panel:** Create a small GUI with controls:
+  - A toggle (checkbox or switch) to enable/disable automatic periodic scanning.
+  - An input (spinbox or text) for the scan interval (in seconds).
+  - A “Select Region” button to choose the screen region (implement an intuitive selection, e.g., a modal overlay to drag-select the area).
+  - A “Reset Session” button to clear the current in-memory list of seen names (so that all names will be treated as new if encountered again).
+  - A “Clear Database” button to delete all stored data (with a confirmation prompt).
+  - (Optional) A “Scan Now” button to manually trigger a scan immediately.
+  - Ensure all settings (region coords, interval, auto-scan on/off) are saved to a local JSON file and loaded on startup.
+- **Efficiency:** Run the scanning (capture + OCR) in a background thread or asynchronous loop so the UI stays responsive. Use the image difference check to skip OCR when possible. If the user scrolls the content, attempt to detect that (e.g., via image comparison or tracking last seen text) and avoid counting the same visible text as a “new” duplicate.
+- **Marker Details:** Use color coding for markers: e.g., use orange for the first time a name reappears (first duplicate) and red for names that have appeared multiple times. Make the markers semi-transparent and sized appropriately (small dot or circle around the text) so as not to obscure underlying text completely. Possibly offer a light/dark mode for these markers for visibility.
+- **Logging and Export (Optional):** Log each scan’s results (timestamp, names found, duplicates) in the database or a log file. Provide a function to export the list of seen names or duplicates to a CSV file.
+- **Tech Stack:** Use PyQt for the GUI and overlay (with QPainter for drawing). Use PyAutoGUI or Pillow for taking screenshots of the region. Use pytesseract for OCR (ensure Tesseract is installed and accessible offline). Use sqlite3 for the database. The entire app must run without internet connectivity.
+
+Now write the Python code implementing the above specifications. Ensure the code is organized (e.g., using classes for the main components: one for the GUI, one for the overlay, one for the worker thread). Include comments explaining key sections.
