@@ -7,22 +7,49 @@ Main entry point for the application
 import sys
 import os
 import logging
+from logging.handlers import RotatingFileHandler
+import json
+from datetime import datetime
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QTimer
 from gui.main_window import MainWindow
 from core.settings_manager import SettingsManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('duplicate_highlighter.log'),
-        logging.StreamHandler()
-    ]
-)
+# Configure logging with rotating file handler
+def setup_logging():
+    """Setup enhanced logging with rotation and JSON format option"""
+    log_file = 'duplicate_highlighter.log'
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Create rotating file handler (5MB max, keep 3 backup files)
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=5*1024*1024,  # 5MB
+        backupCount=3,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    
+    # Create console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+    
+    # Setup root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    return root_logger
 
-logger = logging.getLogger(__name__)
+# Setup logging
+logger = setup_logging()
 
 def main():
     """Main application entry point"""

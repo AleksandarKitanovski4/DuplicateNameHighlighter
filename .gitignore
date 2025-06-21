@@ -9,7 +9,6 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
-develop-eggs/
 dist/
 downloads/
 eggs/
@@ -34,20 +33,16 @@ env.bak/
 
 # IDE / Editor settings
 .idea/
-*.iml
 .vscode/
+*.iml
 *.sublime-project
 *.sublime-workspace
 
 # OS files
 .DS_Store
 Thumbs.db
-
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+ehthumbs.db
+Desktop.ini
 
 # Logs and databases
 *.log
@@ -75,45 +70,11 @@ coverage.xml
 dmypy.json
 
 # Jupyter Notebook
-.ipynb_checkpoints
+.ipynb_checkpoints/
 
-# MacOS
-*.DS_Store
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# poetry
-poetry.lock
-
-# PEP 582; used by e.g. python-on-whales
-__pypackages__/
-
-# Ignore Viber screenshots
-viber_image_*.jpg
-
-# PyCharm
-.idea/
-# Build / compiler outputs
-out/
-**/out/
-*.pyc
-__pycache__/
-# Nested repo folder (if you don’t need it)
-/DuplicateNameHighlighter/
-
-# IDE / build
-.idea/
-out/
-DuplicateNameHighlighter/
+# PyInstaller artifacts
+*.manifest
+# (keep .spec files in repo for your build spec)
 
 # Demo & scratch files
 demo.db
@@ -121,12 +82,8 @@ demo.py
 simple_demo.py
 text_demo.py
 
-# Python packaging / lock
-pyproject.toml
-uv.lock
-
 # Attached assets
 attached_assets/
 
-
-# End of `.gitignore`
+# Build outputs
+out/

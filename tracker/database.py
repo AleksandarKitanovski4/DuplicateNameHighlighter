@@ -382,3 +382,21 @@ class Database:
         except Exception as e:
             logger.error(f"Error vacuuming database: {str(e)}")
             return False
+    
+    def get_all_seen_names(self):
+        """Get all seen names for CSV export
+        Returns:
+            List of tuples: (name, first_seen, total_occurrences)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT name, first_seen, total_occurrences
+                    FROM names
+                    ORDER BY first_seen ASC
+                ''')
+                return [(row['name'], row['first_seen'], row['total_occurrences']) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting all seen names: {str(e)}")
+            return []

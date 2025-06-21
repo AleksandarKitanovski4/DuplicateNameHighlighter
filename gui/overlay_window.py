@@ -94,6 +94,29 @@ class OverlayWindow(QWidget):
         else:
             self.hide()
     
+    def update_markers_from_adjusted(self, adjusted_markers):
+        """Update markers from adjusted positions (for scroll handling)
+        
+        Args:
+            adjusted_markers: List of marker dictionaries with adjusted positions
+        """
+        self.markers = adjusted_markers
+        
+        if self.markers:
+            self.show()
+            self.update()
+            logger.debug(f"Updated overlay with {len(self.markers)} adjusted markers")
+        else:
+            self.hide()
+    
+    def get_current_markers(self):
+        """Get current marker positions
+        
+        Returns:
+            List of current marker dictionaries
+        """
+        return self.markers.copy()
+    
     def clear_markers(self):
         """Clear all markers"""
         self.markers = []

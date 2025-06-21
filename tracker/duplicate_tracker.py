@@ -16,14 +16,17 @@ class DuplicateTracker:
         self.session_names = set()  # Names seen in current session
         self.name_positions = defaultdict(list)  # Track positions of each name
         self.name_counts = defaultdict(int)  # Count occurrences of each name
+        self.position_history = {}  # Track position history for scroll adjustment
+        self.last_scan_names = set()  # Names from last scan for comparison
         
         logger.info("Duplicate tracker initialized")
     
-    def process_names(self, names_with_positions):
+    def process_names(self, names_with_positions, scroll_info=None):
         """Process extracted names and identify duplicates
         
         Args:
             names_with_positions: List of name data from OCR
+            scroll_info: Optional scroll detection info for position adjustment
             
         Returns:
             List of duplicate entries with positions and counts
@@ -51,6 +54,10 @@ class DuplicateTracker:
                     'confidence': name_data['confidence']
                 })
             
+            # Handle scroll adjustment for existing markers
+            if scroll_info:
+                self.adjust_existing_positions(scroll_info)
+            
             # Process each unique name from current scan
             for normalized_name, positions in current_scan_names.items():
                 # Update database
@@ -63,6 +70,9 @@ class DuplicateTracker:
                 # Add to session names
                 self.session_names.add(normalized_name)
                 
+                # Update position history
+                self.update_position_history(normalized_name, positions)
+                
                 # If this name has been seen before (either in session or in database)
                 if total_count > len(positions) or was_in_session:
                     duplicates.append({
@@ -74,11 +84,99 @@ class DuplicateTracker:
                     
                     logger.info(f"Duplicate detected: '{normalized_name}' (count: {total_count})")
             
+            # Update last scan names for comparison
+            self.last_scan_names = set(current_scan_names.keys())
+            
             return duplicates
             
         except Exception as e:
             logger.error(f"Error processing names: {str(e)}", exc_info=True)
             return []
+    
+    def update_position_history(self, normalized_name, positions):
+        """Update position history for a name
+        
+        Args:
+            normalized_name: Normalized name string
+            positions: List of position dictionaries
+        """
+        if normalized_name not in self.position_history:
+            self.position_history[normalized_name] = []
+        
+        # Add current positions with timestamp
+        timestamp = datetime.now()
+        for pos in positions:
+            self.position_history[normalized_name].append({
+                'x': pos['x'],
+                'y': pos['y'],
+                'width': pos['width'],
+                'height': pos['height'],
+                'timestamp': timestamp
+            })
+        
+        # Keep only recent positions (last 10)
+        if len(self.position_history[normalized_name]) > 10:
+            self.position_history[normalized_name] = self.position_history[normalized_name][-10:]
+    
+    def adjust_existing_positions(self, scroll_info):
+        """Adjust existing marker positions based on scroll
+        
+        Args:
+            scroll_info: Scroll detection information
+        """
+        direction = scroll_info['direction']
+        magnitude = scroll_info['magnitude']
+        
+        for name, positions in self.position_history.items():
+            for pos in positions:
+                if direction == 'down':
+                    pos['y'] -= magnitude
+                elif direction == 'up':
+                    pos['y'] += magnitude
+        
+        logger.debug(f"Adjusted positions for {len(self.position_history)} names")
+    
+    def get_names_scrolled_out(self, region_height):
+        """Get names that have scrolled out of view
+        
+        Args:
+            region_height: Height of the monitored region
+            
+        Returns:
+            Set of names that are no longer visible
+        """
+        scrolled_out = set()
+        
+        for name, positions in self.position_history.items():
+            # Check if all positions for this name are out of view
+            all_out_of_view = True
+            for pos in positions:
+                if pos['y'] + pos['height'] > 0 and pos['y'] < region_height:
+                    all_out_of_view = False
+                    break
+            
+            if all_out_of_view:
+                scrolled_out.add(name)
+        
+        return scrolled_out
+    
+    def get_new_names_since_last_scan(self):
+        """Get names that are new since the last scan
+        
+        Returns:
+            Set of new names
+        """
+        current_names = set(self.name_positions.keys())
+        return current_names - self.last_scan_names
+    
+    def get_removed_names_since_last_scan(self):
+        """Get names that were present in last scan but not in current
+        
+        Returns:
+            Set of removed names
+        """
+        current_names = set(self.name_positions.keys())
+        return self.last_scan_names - current_names
     
     def normalize_name(self, name):
         """Normalize name for comparison
@@ -144,6 +242,8 @@ class DuplicateTracker:
         self.session_names.clear()
         self.name_positions.clear()
         self.name_counts.clear()
+        self.position_history.clear()
+        self.last_scan_names.clear()
         logger.info("Session data reset")
     
     def add_manual_name(self, name):
