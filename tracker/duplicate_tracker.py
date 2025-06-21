@@ -3,16 +3,21 @@ Duplicate name tracking and management
 """
 
 import logging
-from datetime import datetime
-from collections import defaultdict
+from typing import List, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
 class DuplicateTracker:
     """Tracks and manages duplicate name detection"""
     
-    def __init__(self, database):
+    def __init__(self, database, overlay):
+        """
+        Args:
+            database: instance of NameDatabase (with add_name_occurrence, clear_all, get_statistics)
+            overlay: instance of Overlay (with update_markers)
+        """
         self.database = database
+<<<<<<<< HEAD:tracker/duplicate_tracker.py
         self.session_names = set()  # Names seen in current session
         self.name_positions = defaultdict(list)  # Track positions of each name
         self.name_counts = defaultdict(int)  # Count occurrences of each name
@@ -30,30 +35,31 @@ class DuplicateTracker:
             
         Returns:
             List of duplicate entries with positions and counts
+========
+        self.overlay = overlay
+        self.session_counts: Dict[str, int] = {}
+        logger.info("DuplicateTracker initialized")
+    
+    def process(self, results: List[Dict]) -> None:
         """
-        if not names_with_positions:
-            return []
+        Process OCR results and highlight duplicates.
         
-        try:
-            current_scan_names = {}
-            duplicates = []
+        Args:
+            results: List of dicts with keys: name, x, y, width, height, confidence
+>>>>>>>> ef98d5a (Finalize repo structure):core/duplicate_tracker.py
+        """
+        duplicate_boxes: List[Tuple[int,int,int,int]] = []
+        
+        for entry in results:
+            name = entry['name']
+            # increment session count
+            count = self.session_counts.get(name, 0) + 1
+            self.session_counts[name] = count
             
-            # Group names from current scan by normalized name
-            for name_data in names_with_positions:
-                name = name_data['name']
-                normalized_name = self.normalize_name(name)
-                
-                if normalized_name not in current_scan_names:
-                    current_scan_names[normalized_name] = []
-                
-                current_scan_names[normalized_name].append({
-                    'x': name_data['x'],
-                    'y': name_data['y'],
-                    'width': name_data['width'],
-                    'height': name_data['height'],
-                    'confidence': name_data['confidence']
-                })
+            # persist occurrence (insert or update)
+            self.database.add_name_occurrence(name)
             
+<<<<<<<< HEAD:tracker/duplicate_tracker.py
             # Handle scroll adjustment for existing markers
             if scroll_info:
                 self.adjust_existing_positions(scroll_info)
@@ -186,43 +192,33 @@ class DuplicateTracker:
             
         Returns:
             Normalized name string
-        """
-        # Convert to lowercase and strip whitespace
-        normalized = name.lower().strip()
+========
+            # if this is a duplicate (seen > 1), queue for highlighting
+            if count > 1:
+                duplicate_boxes.append((
+                    entry['x'],
+                    entry['y'],
+                    entry['width'],
+                    entry['height']
+                ))
+                logger.info(f"Duplicate detected: '{name}' (session count={count})")
         
-        # Remove common OCR artifacts
-        normalized = normalized.replace('|', 'l')  # Pipe to lowercase L
-        normalized = normalized.replace('0', 'o')  # Zero to lowercase O
-        normalized = normalized.replace('1', 'l')  # One to lowercase L
-        
-        # Remove non-alphabetic characters except spaces and hyphens
-        allowed_chars = set('abcdefghijklmnopqrstuvwxyz -')
-        normalized = ''.join(c for c in normalized if c in allowed_chars)
-        
-        # Collapse multiple spaces
-        normalized = ' '.join(normalized.split())
-        
-        return normalized
+        # update overlay: pass empty list to clear markers when no duplicates
+        self.overlay.update_markers(duplicate_boxes)
     
-    def is_duplicate(self, name):
-        """Check if a name is a duplicate
-        
-        Args:
-            name: Name to check
-            
-        Returns:
-            Boolean indicating if name is duplicate
+    def reset_session(self) -> None:
+>>>>>>>> ef98d5a (Finalize repo structure):core/duplicate_tracker.py
         """
-        normalized_name = self.normalize_name(name)
-        return (normalized_name in self.session_names or 
-                self.database.get_name_count(normalized_name) > 0)
+        Clear only in-memory session counts and reset overlay markers.
+        Database remains intact.
+        """
+        self.session_counts.clear()
+        self.overlay.update_markers([])  # clear all markers
+        logger.info("Session counts reset")
     
-    def get_name_statistics(self):
-        """Get statistics about tracked names
-        
-        Returns:
-            Dictionary with statistics
+    def clear_all(self) -> None:
         """
+<<<<<<<< HEAD:tracker/duplicate_tracker.py
         try:
             total_names = len(self.session_names)
             database_stats = self.database.get_statistics()
@@ -251,36 +247,35 @@ class DuplicateTracker:
         
         Args:
             name: Name to add
+========
+        Clear both session data and persistent database.
+>>>>>>>> ef98d5a (Finalize repo structure):core/duplicate_tracker.py
         """
-        normalized_name = self.normalize_name(name)
-        self.session_names.add(normalized_name)
-        self.database.add_name_occurrence(normalized_name, 1)
-        logger.info(f"Manually added name: '{normalized_name}'")
+        self.reset_session()
+        self.database.clear_all()
+        logger.info("All data cleared from session and database")
     
-    def remove_name(self, name):
-        """Remove a name from tracking
-        
-        Args:
-            name: Name to remove
+    def get_statistics(self) -> Dict[str, int]:
         """
-        normalized_name = self.normalize_name(name)
-        if normalized_name in self.session_names:
-            self.session_names.remove(normalized_name)
+        Return statistics combining session and database info:
+            session_names: distinct names seen this session
+            session_occurrences: total occurrences this session
+            database_names: total distinct names in DB
+            database_occurrences: total occurrences in DB
+        """
+        session_names = len(self.session_counts)
+        session_occurrences = sum(self.session_counts.values())
+        db_stats = self.database.get_statistics()
         
-        # Note: We don't remove from database to maintain history
-        logger.info(f"Removed name from session: '{normalized_name}'")
+        return {
+            'session_names': session_names,
+            'session_occurrences': session_occurrences,
+            'database_names': db_stats.get('total_names', 0),
+            'database_occurrences': db_stats.get('total_occurrences', 0)
+        }
     
-    def get_duplicate_history(self, limit=100):
-        """Get history of duplicate detections
-        
-        Args:
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of duplicate detection records
+    def get_duplicate_names(self) -> List[Tuple[str, int]]:
         """
-        try:
-            return self.database.get_recent_names(limit)
-        except Exception as e:
-            logger.error(f"Error getting duplicate history: {str(e)}")
-            return []
+        List names seen more than once in this session, with their session counts.
+        """
+        return [(n, c) for n, c in self.session_counts.items() if c > 1]

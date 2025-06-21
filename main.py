@@ -3,7 +3,7 @@
 Duplicate Name Highlighter Application
 Main entry point for the application
 """
-
+import pytesseract
 import sys
 import os
 import logging
@@ -13,7 +13,7 @@ from datetime import datetime
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QTimer
 from gui.main_window import MainWindow
-from core.settings_manager import SettingsManager
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # Configure logging with rotating file handler
 def setup_logging():
@@ -63,12 +63,9 @@ def main():
         # Enable high DPI scaling
         app.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-        
-        # Initialize settings manager
-        settings_manager = SettingsManager()
-        
+
         # Create and show main window
-        main_window = MainWindow(settings_manager)
+        main_window = MainWindow()
         main_window.show()
         
         logger.info("Duplicate Name Highlighter application started successfully")

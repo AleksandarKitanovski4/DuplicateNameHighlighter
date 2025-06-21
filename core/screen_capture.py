@@ -1,23 +1,55 @@
 """
-Screen capture and change detection functionality
+Screen capture, change detection, OCR, and duplicate management
 """
 
 import logging
+<<<<<<< HEAD
 import time
 import numpy as np
 from PIL import Image, ImageGrab, ImageChops
 import imagehash
 import pyautogui
 import cv2
+=======
+from typing import Optional, Tuple, List, Dict
+import imagehash
+import pyautogui
+from PIL import Image
+from core.ocr_processor import OCRProcessor
+from core.duplicate_tracker import DuplicateTracker
+from gui.overlay import Overlay
+from utils.database import NameDatabase
+>>>>>>> ef98d5a (Finalize repo structure)
 
 logger = logging.getLogger(__name__)
 
 class ScreenCapture:
-    """Handles screen capture and change detection"""
+    """Handles periodic region capture, change detection, OCR, and duplicate highlighting."""
     
-    def __init__(self):
-        self.last_screenshot = None
+    def __init__(
+        self,
+        region: Optional[Tuple[int, int, int, int]] = None,
+        hash_threshold: int = 5
+    ):
+        self.region = region
+        self.last_hash: Optional[imagehash.ImageHash] = None
+        self.hash_threshold = hash_threshold
+        
+        self.ocr = OCRProcessor()
+        self.db = NameDatabase()
+        self.overlay = Overlay()
+        self.tracker = DuplicateTracker(self.db, self.overlay)
+        
+        # Disable PyAutoGUI failsafe (corner mouse throw)
+        pyautogui.FAILSAFE = False
+        
+        logger.info("ScreenCapture initialized")
+    
+    def set_region(self, region: Tuple[int, int, int, int]) -> None:
+        """Define the screen region to monitor (x, y, width, height)."""
+        self.region = region
         self.last_hash = None
+<<<<<<< HEAD
         self.hash_threshold = 5  # Hamming distance threshold for change detection
         self.scroll_threshold = 10  # Threshold for scroll detection
         self.last_scroll_direction = None
@@ -27,108 +59,24 @@ class ScreenCapture:
         pyautogui.FAILSAFE = False  # Disable failsafe for automated use
         
         logger.info("Screen capture initialized")
+=======
+        logger.info(f"Capture region set to {region}")
+>>>>>>> ef98d5a (Finalize repo structure)
     
-    def capture_region(self, region):
-        """Capture screenshot of specified region
-        
-        Args:
-            region: Tuple of (x, y, width, height)
-            
-        Returns:
-            PIL Image object or None if capture fails
+    def capture_and_process(self) -> bool:
         """
-        try:
-            if not region or len(region) != 4:
-                logger.error("Invalid region specified for capture")
-                return None
-            
-            x, y, width, height = region
-            
-            # Validate region bounds
-            if width <= 0 or height <= 0:
-                logger.error(f"Invalid region dimensions: {width}x{height}")
-                return None
-            
-            # Capture using PyAutoGUI (which uses PIL internally)
-            screenshot = pyautogui.screenshot(region=(x, y, width, height))
-            
-            if screenshot is None:
-                logger.error("Failed to capture screenshot")
-                return None
-            
-            # Store reference to last screenshot
-            self.last_screenshot = screenshot.copy()
-            
-            logger.debug(f"Captured region {x},{y} {width}x{height}")
-            return screenshot
-            
-        except Exception as e:
-            logger.error(f"Error capturing region: {str(e)}", exc_info=True)
-            return None
-    
-    def capture_full_screen(self):
-        """Capture full screen screenshot
-        
-        Returns:
-            PIL Image object or None if capture fails
+        Capture the region, skip OCR if unchanged, otherwise run OCR and duplicate detection.
+        Returns True if OCR+processing ran, False if skipped or failed.
         """
-        try:
-            screenshot = pyautogui.screenshot()
-            logger.debug("Captured full screen")
-            return screenshot
-            
-        except Exception as e:
-            logger.error(f"Error capturing full screen: {str(e)}")
-            return None
-    
-    def has_changed(self, current_image, threshold=None):
-        """Check if current image differs from last image
+        if not self.region:
+            logger.error("No capture region defined")
+            return False
         
-        Args:
-            current_image: PIL Image object to compare
-            threshold: Optional threshold for change detection
-            
-        Returns:
-            Boolean indicating if image has changed significantly
-        """
-        try:
-            if current_image is None:
-                return False
-            
-            if threshold is None:
-                threshold = self.hash_threshold
-            
-            # Calculate hash for current image
-            current_hash = imagehash.average_hash(current_image)
-            
-            # If we don't have a previous hash, consider it changed
-            if self.last_hash is None:
-                self.last_hash = current_hash
-                return True
-            
-            # Calculate difference
-            hash_diff = current_hash - self.last_hash
-            
-            # Update last hash
-            self.last_hash = current_hash
-            
-            # Check if difference exceeds threshold
-            has_changed = hash_diff > threshold
-            
-            if has_changed:
-                logger.debug(f"Image changed (hash difference: {hash_diff})")
-            else:
-                logger.debug(f"No significant change (hash difference: {hash_diff})")
-            
-            return has_changed
-            
-        except Exception as e:
-            logger.error(f"Error in change detection: {str(e)}")
-            return True  # Assume changed if we can't determine
-    
-    def get_change_percentage(self, current_image):
-        """Get percentage of change between current and last image
+        img = self._grab_region(self.region)
+        if img is None:
+            return False
         
+<<<<<<< HEAD
         Args:
             current_image: PIL Image object
             
@@ -317,26 +265,86 @@ class ScreenCapture:
             
             image.save(filename)
             logger.info(f"Screenshot saved to {filename}")
+=======
+        if not self._has_changed(img):
+            logger.debug("Region unchanged; skipping OCR")
+            return False
+        
+        texts = self.ocr.extract_text_with_positions(img)
+        if texts:
+            logger.info(f"OCR found {len(texts)} entries")
+            self.tracker.process(texts)
+>>>>>>> ef98d5a (Finalize repo structure)
             return True
-            
-        except Exception as e:
-            logger.error(f"Error saving screenshot: {str(e)}")
+        else:
+            logger.debug("OCR returned no text")
+            self.overlay.clear_markers()
             return False
     
-    def get_screen_info(self):
-        """Get screen information
-        
-        Returns:
-            Dictionary with screen information
+    def _grab_region(self, region: Tuple[int, int, int, int]) -> Optional[Image.Image]:
+        """Capture screenshot of the given region via PyAutoGUI."""
+        x, y, w, h = region
+        if w <= 0 or h <= 0:
+            logger.error(f"Invalid region dimensions: {w}×{h}")
+            return None
+        try:
+            img = pyautogui.screenshot(region=region)
+            logger.debug(f"Captured region {region}")
+            return img
+        except Exception as e:
+            logger.error(f"Screenshot failed: {e}", exc_info=True)
+            return None
+    
+    def _has_changed(self, img: Image.Image) -> bool:
+        """
+        Compare pHash of current image to last. If no previous hash, treat as changed.
+        Returns True if change exceeds threshold.
         """
         try:
-            screen_size = pyautogui.size()
-            return {
-                'width': screen_size.width,
-                'height': screen_size.height,
-                'position': pyautogui.position()
-            }
-            
+            current = imagehash.phash(img)
+            if self.last_hash is None:
+                self.last_hash = current
+                return True
+            diff = current - self.last_hash
+            self.last_hash = current
+            changed = diff > self.hash_threshold
+            logger.debug(f"Hash diff={diff}; threshold={self.hash_threshold}; changed={changed}")
+            return changed
         except Exception as e:
-            logger.error(f"Error getting screen info: {str(e)}")
-            return {}
+            logger.error(f"Change detection error: {e}", exc_info=True)
+            # Fallback: always process if unsure
+            self.last_hash = None
+            return True
+    
+    def reset_session(self) -> None:
+        """Clear in-memory tracking and overlay markers (database persists)."""
+        self.tracker.reset_session()
+        self.last_hash = None
+        logger.info("Session reset")
+    
+    def clear_all(self) -> None:
+        """Clear both session and persistent database, and hide markers."""
+        self.tracker.clear_all()
+        self.last_hash = None
+        logger.info("All data cleared")
+    
+    def get_statistics(self) -> Dict:
+        """Retrieve combined session+database statistics."""
+        return self.tracker.get_statistics()
+    
+    def save_screenshot(self, img: Image.Image, path: str) -> None:
+        """Save the last captured image for debugging."""
+        try:
+            img.save(path)
+            logger.info(f"Screenshot saved to {path}")
+        except Exception as e:
+            logger.error(f"Save screenshot failed: {e}")
+    
+    def get_screen_info(self) -> Dict:
+        """Return screen size and current region."""
+        screen = pyautogui.size()
+        return {
+            'screen_width': screen.width,
+            'screen_height': screen.height,
+            'region': self.region
+        }

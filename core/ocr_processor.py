@@ -5,167 +5,160 @@ OCR processing module using Tesseract for text extraction
 import logging
 import os
 import tempfile
-from PIL import Image, ImageEnhance
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 import pytesseract
 from pytesseract import Output
 
 logger = logging.getLogger(__name__)
 
+
 class OCRProcessor:
     """Handles OCR text extraction with position information"""
-    
-    def __init__(self):
+
+    def __init__(self, min_confidence: float = 60.0):
+        self.min_confidence = min_confidence
         self.setup_tesseract()
-        self.min_confidence = 30  # Minimum confidence threshold for text detection
-        
+
     def setup_tesseract(self):
-        """Setup Tesseract OCR configuration"""
-        # Try to find Tesseract executable
+        """Locate and configure the Tesseract OCR executable."""
         possible_paths = [
             r'C:\Program Files\Tesseract-OCR\tesseract.exe',
             r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
-            'tesseract'  # Assume it's in PATH
+            'tesseract'  # assume on PATH
         ]
-        
-        tesseract_path = None
         for path in possible_paths:
             try:
                 if os.path.exists(path) or path == 'tesseract':
                     pytesseract.pytesseract.tesseract_cmd = path
-                    # Test if it works
-                    test_image = Image.new('RGB', (100, 50), color='white')
-                    pytesseract.image_to_string(test_image)
-                    tesseract_path = path
-                    break
+                    # quick sanity check
+                    img = Image.new('RGB', (10, 10), 'white')
+                    pytesseract.image_to_string(img)
+                    logger.info(f"Tesseract found at: {path}")
+                    return
             except Exception:
                 continue
-        
-        if not tesseract_path:
-            logger.error("Tesseract OCR not found. Please install Tesseract OCR.")
-            raise RuntimeError("Tesseract OCR not found")
-        
-        logger.info(f"Tesseract found at: {tesseract_path}")
-        
-        # Configure OCR parameters for better name detection
-        self.ocr_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '
-    
-    def preprocess_image(self, image):
-        """Preprocess image for better OCR accuracy
-        
-        Args:
-            image: PIL Image object
-            
-        Returns:
-            PIL Image object (preprocessed)
+        logger.error("Tesseract OCR not found. Please install it.")
+        raise RuntimeError("Tesseract OCR not found")
+
+    def preprocess_image(self, image: Image.Image) -> Image.Image:
         """
-        try:
-            # Convert to grayscale
-            if image.mode != 'L':
-                image = image.convert('L')
-            
-            # Enhance contrast
-            enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.5)
-            
-            # Enhance sharpness
-            enhancer = ImageEnhance.Sharpness(image)
-            image = enhancer.enhance(1.2)
-            
-            # Resize if image is too small (OCR works better on larger images)
-            width, height = image.size
-            if width < 300 or height < 100:
-                scale_factor = max(300 / width, 100 / height)
-                new_width = int(width * scale_factor)
-                new_height = int(height * scale_factor)
-                image = image.resize((new_width, new_height), Image.LANCZOS)
-            
-            return image
-            
-        except Exception as e:
-            logger.error(f"Error preprocessing image: {str(e)}")
-            return image  # Return original if preprocessing fails
-    
-    def extract_text_with_positions(self, image):
-        """Extract text with position information from image
-        
-        Args:
-            image: PIL Image object
-            
-        Returns:
-            List of dictionaries containing name and position info:
-            [{'name': 'John', 'x': 10, 'y': 20, 'width': 30, 'height': 15}, ...]
+        Convert to grayscale, scale small images, denoise and binarize
+        using OpenCV for optimal OCR results.
         """
-        try:
-            if image is None:
-                logger.error("No image provided for OCR")
-                return []
-            
-            # Preprocess image
-            processed_image = self.preprocess_image(image)
-            
-            # Extract text data with positions
-            ocr_data = pytesseract.image_to_data(processed_image, 
-                                               config=self.ocr_config,
-                                               output_type=Output.DICT)
-            
-            names_with_positions = []
-            
-            # Process OCR results
-            for i in range(len(ocr_data['text'])):
-                confidence = float(ocr_data['conf'][i])
-                text = ocr_data['text'][i].strip()
-                
-                # Filter out low confidence and empty text
-                if confidence < self.min_confidence or not text:
-                    continue
-                
-                # Filter out single characters and numbers-only text
-                if len(text) < 2 or text.isdigit():
-                    continue
-                
-                # Get position information
-                x = ocr_data['left'][i]
-                y = ocr_data['top'][i]
-                width = ocr_data['width'][i]
-                height = ocr_data['height'][i]
-                
-                # Skip if dimensions are too small
-                if width < 10 or height < 8:
-                    continue
-                
-                name_data = {
-                    'name': text,
-                    'x': x,
-                    'y': y,
-                    'width': width,
-                    'height': height,
-                    'confidence': confidence
-                }
-                
-                names_with_positions.append(name_data)
-            
-            logger.info(f"OCR extracted {len(names_with_positions)} potential names")
-            return names_with_positions
-            
-        except Exception as e:
-            logger.error(f"OCR processing error: {str(e)}", exc_info=True)
+        # to grayscale
+        if image.mode != 'L':
+            image = image.convert('L')
+        w, h = image.size
+        # scale up to at least 300×100, but no more than 2×
+        if w < 300 or h < 100:
+            factor = min(2.0, max(300/w, 100/h))
+            image = image.resize((int(w*factor), int(h*factor)), Image.LANCZOS)
+        arr = np.array(image)
+        arr = cv2.medianBlur(arr, 3)
+        arr = cv2.adaptiveThreshold(
+            arr, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            11, 2
+        )
+        return Image.fromarray(arr)
+
+    def extract_text_with_positions(self, image: Image.Image) -> list[dict]:
+        """
+        Run OCR, filter low-confidence or tiny regions, then
+        group by block to form multi-word names.
+        Returns list of dicts with keys: name, x, y, width, height, confidence.
+        """
+        if image is None:
+            logger.error("No image provided for OCR")
             return []
-    
-    def test_ocr(self):
-        """Test OCR functionality with a sample image"""
+
+        processed = self.preprocess_image(image)
+        config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz '
+        data = pytesseract.image_to_data(
+            processed, config=config, output_type=Output.DICT
+        )
+
+        entries = []
+        n = len(data['text'])
+        for i in range(n):
+            conf = float(data['conf'][i] or -1)
+            txt = data['text'][i].strip()
+            if conf < self.min_confidence or len(txt) < 2 or txt.isdigit():
+                continue
+            x, y, w, h = (data['left'][i], data['top'][i],
+                          data['width'][i], data['height'][i])
+            if w < 10 or h < 8:
+                continue
+            entries.append({
+                'text': txt,
+                'block': data.get('block_num', [0]*n)[i],
+                'par': data.get('par_num', [0]*n)[i],
+                'x': x, 'y': y, 'width': w, 'height': h, 'conf': conf
+            })
+
+        # group by block_num (and par_num)
+        grouped = {}
+        for e in entries:
+            key = (e['block'], e['par'])
+            grouped.setdefault(key, []).append(e)
+
+        results = []
+        for group in grouped.values():
+            # sort left-to-right, top-to-bottom
+            group.sort(key=lambda e: (e['y'], e['x']))
+            texts = [e['text'] for e in group]
+            name = ' '.join(texts).title()
+            xs = [e['x'] for e in group]
+            ys = [e['y'] for e in group]
+            ws = [e['width'] for e in group]
+            hs = [e['height'] for e in group]
+            confs = [e['conf'] for e in group]
+            min_x, min_y = min(xs), min(ys)
+            max_x = max(x + w for x, w in zip(xs, ws))
+            max_y = max(y + h for y, h in zip(ys, hs))
+            results.append({
+                'name': name,
+                'x': min_x, 'y': min_y,
+                'width': max_x - min_x,
+                'height': max_y - min_y,
+                'confidence': sum(confs)/len(confs)
+            })
+
+        logger.info(f"OCR extracted {len(results)} names")
+        return results
+
+    def test_extract(self) -> bool:
+        """
+        Synthetic unit test: draw known names, run extract, assert grouping.
+        """
         try:
-            # Create a test image with text
-            test_image = Image.new('RGB', (200, 100), color='white')
-            
-            # Use a temporary file to test OCR
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-                test_image.save(temp_file.name)
-                result = pytesseract.image_to_string(test_image)
-                os.unlink(temp_file.name)
-                
-            logger.info("OCR test completed successfully")
-            return True
-            
+            img = Image.new('RGB', (400, 200), 'white')
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("arial.ttf", 24)
+            except Exception:
+                font = ImageFont.load_default()
+            test_names = [
+                ("John Smith", (50, 50)),
+                ("Jane Doe", (50, 100)),
+                ("Bob Johnson", (200, 50)),
+                ("Alice Brown", (200, 100))
+            ]
+            for txt, pos in test_names:
+                draw.text(pos, txt, fill='black', font=font)
+            results = self.extract_text_with_positions(img)
+            names = {r['name'] for r in results}
+            # expect all four full names
+            success = set([n for n, _ in test_names]).issubset(names)
+            if success:
+                logger.info("test_extract passed")
+            else:
+                logger.warning(f"test_extract failed, found: {names}")
+            return success
         except Exception as e:
-            logger.error(f"OCR test failed: {str(e)}")
+            logger.error(f"test_extract exception: {e}")
             return False

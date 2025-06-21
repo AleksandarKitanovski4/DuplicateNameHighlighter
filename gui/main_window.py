@@ -2,13 +2,16 @@
 Main GUI window for the Duplicate Name Highlighter application
 """
 
+import sys
 import logging
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                            QPushButton, QLabel, QSpinBox, QCheckBox, QGroupBox,
-                            QMessageBox, QSystemTrayIcon, QMenu, QAction)
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal, Qt
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QSpinBox, QCheckBox, QMessageBox
+)
+from PyQt5.QtCore import QTimer
+
 from gui.region_selector import RegionSelector
+<<<<<<< HEAD
 from gui.overlay_window import OverlayWindow
 from core.ocr_processor import OCRProcessor
 from tracker.duplicate_tracker import DuplicateTracker
@@ -69,83 +72,53 @@ class ScanWorker(QThread):
         self.quit()
         self.wait()
 
+=======
+from core.screen_capture import ScreenCapture
+
+logger = logging.getLogger(__name__)
+
+>>>>>>> ef98d5a (Finalize repo structure)
 class MainWindow(QMainWindow):
-    """Main application window"""
-    
-    def __init__(self, settings_manager):
+    """Main settings window to control scanning and display status"""
+
+    def __init__(self):
         super().__init__()
-        self.settings_manager = settings_manager
-        self.setup_components()
-        self.setup_ui()
-        self.setup_system_tray()
-        self.load_settings()
-        
-        # Worker thread for OCR processing
-        self.scan_worker = None
-        
-        # Timer for automatic scanning
-        self.scan_timer = QTimer()
-        self.scan_timer.timeout.connect(self.perform_scan)
-        
-        logger.info("Main window initialized")
-    
-    def setup_components(self):
-        """Initialize core components"""
-        self.database = Database()
-        self.duplicate_tracker = DuplicateTracker(self.database)
-        self.screen_capture = ScreenCapture()
-        self.ocr_processor = OCRProcessor()
-        self.overlay_window = OverlayWindow()
-        self.region_selector = RegionSelector()
-        
-        # Connect signals
-        self.region_selector.region_selected.connect(self.on_region_selected)
-    
-    def setup_ui(self):
-        """Setup the user interface"""
         self.setWindowTitle("Duplicate Name Highlighter")
-        self.setFixedSize(400, 300)
-        
-        # Central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-        
-        # Region selection group
-        region_group = QGroupBox("Screen Region")
-        region_layout = QVBoxLayout(region_group)
-        
-        self.region_label = QLabel("No region selected")
-        self.region_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
-        region_layout.addWidget(self.region_label)
-        
-        self.select_region_btn = QPushButton("Select Region")
-        self.select_region_btn.clicked.connect(self.select_region)
-        region_layout.addWidget(self.select_region_btn)
-        
-        layout.addWidget(region_group)
-        
-        # Scanning controls group
-        scan_group = QGroupBox("Scanning Controls")
-        scan_layout = QVBoxLayout(scan_group)
-        
-        # Auto-scan checkbox
-        self.auto_scan_checkbox = QCheckBox("Enable Auto-Scan")
-        self.auto_scan_checkbox.toggled.connect(self.toggle_auto_scan)
-        scan_layout.addWidget(self.auto_scan_checkbox)
-        
+        self.setFixedSize(300, 300)
+
+        # Core components
+        self.screen_capture = ScreenCapture()
+
+        # Region selector (PyQt overlay/dialog)
+        self.region_selector = RegionSelector()
+        self.region_selector.region_selected.connect(self.on_region_selected)
+
+        # Build UI
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+
+        # Region selection
+        self.region_btn = QPushButton("Select Region")
+        layout.addWidget(self.region_btn)
+
+        # Auto-scan toggle
+        self.auto_cb = QCheckBox("Enable Auto-Scan")
+        self.auto_cb.setEnabled(False)  # овозможува по избор на регион
+        layout.addWidget(self.auto_cb)
+
         # Scan interval
-        interval_layout = QHBoxLayout()
-        interval_layout.addWidget(QLabel("Scan Interval (seconds):"))
-        self.interval_spinbox = QSpinBox()
-        self.interval_spinbox.setRange(1, 60)
-        self.interval_spinbox.setValue(3)
-        self.interval_spinbox.valueChanged.connect(self.update_scan_interval)
-        interval_layout.addWidget(self.interval_spinbox)
-        scan_layout.addLayout(interval_layout)
-        
-        # Manual scan button
+        hl = QHBoxLayout()
+        hl.addWidget(QLabel("Interval (s):"))
+        self.interval_spin = QSpinBox()
+        self.interval_spin.setRange(1, 60)
+        self.interval_spin.setValue(3)
+        hl.addWidget(self.interval_spin)
+        layout.addLayout(hl)
+
+        # Manual scan button (овозможи по избор на регион)
         self.manual_scan_btn = QPushButton("Scan Now")
+<<<<<<< HEAD
         self.manual_scan_btn.clicked.connect(self.perform_scan)
         scan_layout.addWidget(self.manual_scan_btn)
         
@@ -254,51 +227,94 @@ class MainWindow(QMainWindow):
         from PyQt5.QtWidgets import QApplication
         QApplication.quit()
     
+=======
+        self.manual_scan_btn.setEnabled(False)
+        layout.addWidget(self.manual_scan_btn)
+
+        # Reset and Clear
+        self.reset_btn = QPushButton("Reset Session")
+        self.clear_btn = QPushButton("Clear Database")
+        layout.addWidget(self.reset_btn)
+        layout.addWidget(self.clear_btn)
+
+        # Status
+        self.status_lbl = QLabel("Ready")
+        layout.addWidget(self.status_lbl)
+
+        # Timer for auto-scan
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.scan)
+
+        # Connect UI signals
+        self.region_btn.clicked.connect(self.select_region)
+        self.auto_cb.toggled.connect(self.on_auto_toggled)
+        self.interval_spin.valueChanged.connect(self.update_interval)
+        self.manual_scan_btn.clicked.connect(self.scan)
+        self.reset_btn.clicked.connect(self.reset_session)
+        self.clear_btn.clicked.connect(self.clear_all)
+
+        # Initialize interval
+        self.update_interval(self.interval_spin.value())
+
+>>>>>>> ef98d5a (Finalize repo structure)
     def select_region(self):
-        """Open region selection dialog"""
-        self.hide()  # Hide main window during selection
+        """Hide main window, започни избор на регија, па прикажи повторно."""
+        self.hide()
         self.region_selector.start_selection()
-    
+        self.show()
+
     def on_region_selected(self, region):
-        """Handle region selection completion"""
-        self.show()  # Show main window again
+        """Callback кога корисникот завршил со избор на регија."""
         if region:
-            x, y, width, height = region
-            self.region_label.setText(f"Region: {x},{y} ({width}x{height})")
-            self.region_label.setStyleSheet("QLabel { color: #000; }")
-            self.settings_manager.set_setting('region', region)
-            logger.info(f"Region selected: {region}")
+            self.screen_capture.set_region(region)
+            self.status_lbl.setText(f"Region: {region}")
+            logger.info(f"Region set to {region}")
+            # Овозможи го auto-сакен и копчето за Scan
+            self.auto_cb.setEnabled(True)
+            self.manual_scan_btn.setEnabled(True)
         else:
+            self.status_lbl.setText("No region selected")
             logger.info("Region selection cancelled")
-    
-    def toggle_auto_scan(self, enabled):
-        """Toggle automatic scanning"""
-        if enabled and self.get_current_region():
-            interval = self.interval_spinbox.value() * 1000  # Convert to milliseconds
-            self.scan_timer.start(interval)
-            self.status_label.setText(f"Auto-scanning every {self.interval_spinbox.value()}s")
+
+    def on_auto_toggled(self, checked):
+        """Start/stop periodic scanning."""
+        if checked:
+            if not self.screen_capture.region:
+                QMessageBox.warning(
+                    self, "No Region Selected",
+                    "Please select a capture region first."
+                )
+                self.auto_cb.setChecked(False)
+                return
+
+            interval_ms = self.interval_spin.value() * 1000
+            self.timer.start(interval_ms)
+            self.status_lbl.setText(f"Auto-scan every {self.interval_spin.value()}s")
             logger.info("Auto-scan enabled")
         else:
-            self.scan_timer.stop()
-            self.status_label.setText("Auto-scan disabled")
+            self.timer.stop()
+            self.status_lbl.setText("Auto-scan disabled")
             logger.info("Auto-scan disabled")
-    
-    def update_scan_interval(self, value):
-        """Update scanning interval"""
-        if self.scan_timer.isActive():
-            self.scan_timer.start(value * 1000)  # Restart with new interval
-            self.status_label.setText(f"Auto-scanning every {value}s")
-    
-    def get_current_region(self):
-        """Get the currently selected region"""
-        return self.settings_manager.get_setting('region')
-    
-    def perform_scan(self):
-        """Perform OCR scan of the selected region"""
-        region = self.get_current_region()
-        if not region:
-            self.status_label.setText("Please select a region first")
+
+    def update_interval(self, val):
+        """Update timer interval."""
+        self.timer.setInterval(val * 1000)
+        if self.auto_cb.isChecked():
+            self.timer.start()
+
+    def scan(self):
+        """Perform one scan."""
+        # Проверка дали е поставена регија
+        if not self.screen_capture.region:
+            QMessageBox.warning(
+                self, "No Region Selected",
+                "Please select a capture region first."
+            )
+            self.timer.stop()
+            self.auto_cb.setChecked(False)
+            self.status_lbl.setText("No region defined")
             return
+<<<<<<< HEAD
         
         if self.scan_worker and self.scan_worker.isRunning():
             logger.debug("Scan already in progress, skipping")
@@ -359,45 +375,51 @@ class MainWindow(QMainWindow):
                 self.overlay_window.clear_markers()
                 self.status_label.setText("No duplicates found")
                 
+=======
+
+        self.status_lbl.setText("Scanning...")
+        try:
+            # ОВДЕ – повик без аргумент!
+            ok = self.screen_capture.capture_and_process()
+>>>>>>> ef98d5a (Finalize repo structure)
         except Exception as e:
-            logger.error(f"Error processing scan results: {str(e)}", exc_info=True)
-            self.status_label.setText("Error processing results")
-    
-    def on_scan_error(self, error_message):
-        """Handle scan error"""
-        self.status_label.setText(f"Scan error: {error_message}")
-        logger.error(f"Scan error: {error_message}")
-    
-    def on_scan_finished(self):
-        """Handle scan completion"""
-        self.manual_scan_btn.setEnabled(True)
-    
+            logger.error(f"Scan failed: {e}", exc_info=True)
+            self.status_lbl.setText("Scan error")
+            return
+
+        stats = self.screen_capture.get_statistics()
+        if ok:
+            self.status_lbl.setText(
+                f"Session: {stats['session_names']} names, "
+                f"{stats['session_occurrences']} occurrences"
+            )
+        else:
+            self.status_lbl.setText("No change or no text")
+
     def reset_session(self):
-        """Reset the current session"""
-        reply = QMessageBox.question(self, 'Reset Session', 
-                                   'Reset current session memory? This will clear all tracked names for this session.',
-                                   QMessageBox.Yes | QMessageBox.No, 
-                                   QMessageBox.No)
-        
+        """Reset in-memory session counts."""
+        reply = QMessageBox.question(
+            self, "Reset Session",
+            "Clear current session data?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
         if reply == QMessageBox.Yes:
-            self.duplicate_tracker.reset_session()
-            self.overlay_window.clear_markers()
-            self.status_label.setText("Session reset")
+            self.screen_capture.reset_session()
+            self.status_lbl.setText("Session reset")
             logger.info("Session reset by user")
-    
-    def clear_database(self):
-        """Clear the entire database"""
-        reply = QMessageBox.question(self, 'Clear Database', 
-                                   'Clear entire database? This will permanently delete all stored data.',
-                                   QMessageBox.Yes | QMessageBox.No, 
-                                   QMessageBox.No)
-        
+
+    def clear_all(self):
+        """Clear both session and database."""
+        reply = QMessageBox.question(
+            self, "Clear Database",
+            "Delete all stored data?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
         if reply == QMessageBox.Yes:
-            self.database.clear_all_data()
-            self.duplicate_tracker.reset_session()
-            self.overlay_window.clear_markers()
-            self.status_label.setText("Database cleared")
+            self.screen_capture.clear_all()
+            self.status_lbl.setText("Database cleared")
             logger.info("Database cleared by user")
+<<<<<<< HEAD
     
     def load_settings(self):
         """Load settings from configuration"""
@@ -493,3 +515,22 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status_label.setText("Failed to open log file")
             logger.error(f"Failed to open log file: {str(e)}")
+=======
+
+    def closeEvent(self, event):
+        """Hide overlay and exit cleanly."""
+        self.screen_capture.hide_overlay()
+        event.accept()
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()
+>>>>>>> ef98d5a (Finalize repo structure)
