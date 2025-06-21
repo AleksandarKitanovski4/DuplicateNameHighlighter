@@ -97,4 +97,7 @@ poetry.lock
 # PEP 582; used by e.g. python-on-whales
 __pypackages__/
 
+# Ignore Viber screenshots
+viber_image_*.jpg
+
 # End of `.gitignore`
