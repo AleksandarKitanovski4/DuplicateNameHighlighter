@@ -100,4 +100,33 @@ __pypackages__/
 # Ignore Viber screenshots
 viber_image_*.jpg
 
+# PyCharm
+.idea/
+# Build / compiler outputs
+out/
+**/out/
+*.pyc
+__pycache__/
+# Nested repo folder (if you don’t need it)
+/DuplicateNameHighlighter/
+
+# IDE / build
+.idea/
+out/
+DuplicateNameHighlighter/
+
+# Demo & scratch files
+demo.db
+demo.py
+simple_demo.py
+text_demo.py
+
+# Python packaging / lock
+pyproject.toml
+uv.lock
+
+# Attached assets
+attached_assets/
+
+
 # End of `.gitignore`
