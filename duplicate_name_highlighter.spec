@@ -8,6 +8,7 @@ hiddenimports = collect_submodules('core') + collect_submodules('gui') + collect
 
 a = Analysis([
     'main.py',
+    'core/scroll_tracker.py',
 ],
     pathex=['.'],
     binaries=[],
@@ -18,6 +19,7 @@ a = Analysis([
         ('*.db', '.'),
         ('*.json', '.'),
         ('attached_assets/*', 'attached_assets'),
+        ('gui/settings_dialog.py', 'gui'),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

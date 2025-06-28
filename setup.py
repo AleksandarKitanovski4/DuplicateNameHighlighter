@@ -2,16 +2,20 @@ from setuptools import setup, find_packages
 
 setup(
     name='DuplicateNameHighlighter',
-    version='1.0.0',
+    version='0.2.0',
     description='Real-time duplicate name highlighter with OCR and overlay',
     author='Your Name',
     packages=find_packages(include=['core', 'gui', 'utils', 'core.*', 'gui.*', 'utils.*']),
     install_requires=[
         'PyQt5>=5.15.0',
-        'pillow>=9.0.0',
+        'numpy',
+        'opencv-python',
+        'pillow',
+        'pyautogui',
+        'imagehash',
+        'pytesseract',
         'pytesseract>=0.3.10',
         'opencv-python>=4.5.0.62',
-        'imagehash>=4.2.1',
         'pyautogui>=0.9.53',
         'numpy>=1.21.0',
     ],

@@ -51,6 +51,8 @@ def setup_logging():
 # Setup logging
 logger = setup_logging()
 
+__version__ = '0.2.0'
+
 def main():
     """Main application entry point"""
     try:

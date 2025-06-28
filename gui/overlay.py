@@ -3,7 +3,7 @@ Transparent overlay window for displaying duplicate name markers
 """
 
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtCore import Qt, QRect
 from PyQt5.QtGui import QPainter, QPen, QColor, QBrush
@@ -30,11 +30,61 @@ class Overlay:
             self.widget.hide()
             logger.info("Overlay: no markers to show, hiding overlay")
     
+    def update_markers_with_offset(self, boxes: List[Tuple[int, int, int, int]], offset_x: int = 0, offset_y: int = 0):
+        """Update markers with position offset for scroll adjustment
+        
+        Args:
+            boxes: List of marker boxes (x, y, width, height)
+            offset_x: Horizontal offset to apply
+            offset_y: Vertical offset to apply
+        """
+        adjusted_boxes = []
+        for x, y, w, h in boxes:
+            adjusted_boxes.append((x + offset_x, y + offset_y, w, h))
+        
+        self.update_markers(adjusted_boxes)
+        logger.debug(f"Updated {len(adjusted_boxes)} markers with offset ({offset_x}, {offset_y})")
+    
+    def adjust_markers_for_scroll(self, scroll_info: Dict):
+        """Adjust marker positions based on scroll information
+        
+        Args:
+            scroll_info: Dictionary with 'direction' and 'magnitude' keys
+        """
+        if not scroll_info or not self.widget.markers:
+            return
+        
+        direction = scroll_info['direction']
+        magnitude = scroll_info['magnitude']
+        
+        adjusted_markers = []
+        for x, y, w, h in self.widget.markers:
+            if direction == 'down':
+                # Content scrolled down, markers move up
+                new_y = y - magnitude
+            elif direction == 'up':
+                # Content scrolled up, markers move down
+                new_y = y + magnitude
+            else:
+                new_y = y
+            
+            # Check if marker is still within visible area (with tolerance)
+            if new_y + h > -50:  # Allow slight overflow
+                adjusted_markers.append((x, new_y, w, h))
+        
+        self.widget.markers = adjusted_markers
+        self.widget.update()
+        logger.debug(f"Adjusted {len(adjusted_markers)} markers for {direction} scroll")
+    
     def clear_markers(self):
         """Clear all markers"""
         self.widget.markers = []
         self.widget.hide()
         logger.info("Overlay markers cleared")
+    
+    def get_marker_positions(self) -> List[Tuple[int, int, int, int]]:
+        """Get current marker positions"""
+        return self.widget.markers.copy()
 
 
 class OverlayWidget(QWidget):
@@ -62,8 +112,10 @@ class OverlayWidget(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         
         # Cover the entire virtual desktop
-        screen_geom = QApplication.primaryScreen().geometry()
-        self.setGeometry(screen_geom)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geom = screen.geometry()
+            self.setGeometry(screen_geom)
         logger.info("OverlayWidget window configured")
     
     def paintEvent(self, event):
@@ -105,7 +157,9 @@ class OverlayWidget(QWidget):
     def resizeEvent(self, event):
         """Keep overlay covering the full screen on resolution changes"""
         super().resizeEvent(event)
-        geom = QApplication.primaryScreen().geometry()
-        if self.geometry() != geom:
-            self.setGeometry(geom)
-            logger.info("OverlayWidget resized to full screen")
+        screen = QApplication.primaryScreen()
+        if screen:
+            geom = screen.geometry()
+            if self.geometry() != geom:
+                self.setGeometry(geom)
+                logger.info("OverlayWidget resized to full screen")

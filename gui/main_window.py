@@ -4,14 +4,16 @@ Main GUI window for the Duplicate Name Highlighter application
 
 import sys
 import logging
+
+from PIL.ImageQt import QPixmap
+from PyQt5.QtGui import QPainter, QColor, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QSpinBox, QCheckBox, QMessageBox
+    QPushButton, QLabel, QSpinBox, QCheckBox, QMessageBox, QGroupBox, QSystemTrayIcon, QMenu, QAction
 )
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, pyqtSignal, QThread, Qt
 
 from gui.region_selector import RegionSelector
-<<<<<<< HEAD
 from gui.overlay_window import OverlayWindow
 from core.ocr_processor import OCRProcessor
 from tracker.duplicate_tracker import DuplicateTracker
@@ -72,12 +74,12 @@ class ScanWorker(QThread):
         self.quit()
         self.wait()
 
-=======
+
 from core.screen_capture import ScreenCapture
 
 logger = logging.getLogger(__name__)
 
->>>>>>> ef98d5a (Finalize repo structure)
+
 class MainWindow(QMainWindow):
     """Main settings window to control scanning and display status"""
 
@@ -118,7 +120,7 @@ class MainWindow(QMainWindow):
 
         # Manual scan button (овозможи по избор на регион)
         self.manual_scan_btn = QPushButton("Scan Now")
-<<<<<<< HEAD
+
         self.manual_scan_btn.clicked.connect(self.perform_scan)
         scan_layout.addWidget(self.manual_scan_btn)
         
@@ -226,8 +228,7 @@ class MainWindow(QMainWindow):
         # Quit application
         from PyQt5.QtWidgets import QApplication
         QApplication.quit()
-    
-=======
+
         self.manual_scan_btn.setEnabled(False)
         layout.addWidget(self.manual_scan_btn)
 
@@ -256,7 +257,7 @@ class MainWindow(QMainWindow):
         # Initialize interval
         self.update_interval(self.interval_spin.value())
 
->>>>>>> ef98d5a (Finalize repo structure)
+
     def select_region(self):
         """Hide main window, започни избор на регија, па прикажи повторно."""
         self.hide()
@@ -304,7 +305,6 @@ class MainWindow(QMainWindow):
 
     def scan(self):
         """Perform one scan."""
-        # Проверка дали е поставена регија
         if not self.screen_capture.region:
             QMessageBox.warning(
                 self, "No Region Selected",
@@ -314,8 +314,7 @@ class MainWindow(QMainWindow):
             self.auto_cb.setChecked(False)
             self.status_lbl.setText("No region defined")
             return
-<<<<<<< HEAD
-        
+
         if self.scan_worker and self.scan_worker.isRunning():
             logger.debug("Scan already in progress, skipping")
             return
@@ -374,14 +373,12 @@ class MainWindow(QMainWindow):
             else:
                 self.overlay_window.clear_markers()
                 self.status_label.setText("No duplicates found")
-                
-=======
 
         self.status_lbl.setText("Scanning...")
         try:
             # ОВДЕ – повик без аргумент!
             ok = self.screen_capture.capture_and_process()
->>>>>>> ef98d5a (Finalize repo structure)
+
         except Exception as e:
             logger.error(f"Scan failed: {e}", exc_info=True)
             self.status_lbl.setText("Scan error")
@@ -419,8 +416,7 @@ class MainWindow(QMainWindow):
             self.screen_capture.clear_all()
             self.status_lbl.setText("Database cleared")
             logger.info("Database cleared by user")
-<<<<<<< HEAD
-    
+
     def load_settings(self):
         """Load settings from configuration"""
         # Load region
@@ -515,7 +511,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status_label.setText("Failed to open log file")
             logger.error(f"Failed to open log file: {str(e)}")
-=======
 
     def closeEvent(self, event):
         """Hide overlay and exit cleanly."""
@@ -533,4 +528,3 @@ def main():
 
 if __name__ == "__main__":
     main()
->>>>>>> ef98d5a (Finalize repo structure)

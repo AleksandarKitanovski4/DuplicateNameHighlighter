@@ -206,6 +206,11 @@ class SettingsDialog(QDialog):
         self.auto_export_checkbox = QCheckBox()
         export_layout.addWidget(self.auto_export_checkbox, 1, 1)
         
+        # Export CSV button
+        self.export_csv_btn = QPushButton("Export CSV")
+        self.export_csv_btn.clicked.connect(self.export_csv)
+        export_layout.addWidget(self.export_csv_btn, 2, 0, 1, 3)  # Span 3 columns
+        
         layout.addWidget(export_group)
         layout.addStretch()
         return widget
@@ -234,6 +239,49 @@ class SettingsDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Select Export Folder")
         if folder:
             self.export_folder_edit.setText(folder)
+    
+    def export_csv(self):
+        """Export data to CSV file"""
+        try:
+            # Get export folder from settings or prompt user
+            export_folder = self.export_folder_edit.text().strip()
+            if not export_folder:
+                export_folder = QFileDialog.getExistingDirectory(self, "Select Export Folder")
+                if not export_folder:
+                    return
+                self.export_folder_edit.setText(export_folder)
+            
+            # Import the database export function
+            from tracker.database import Database
+            
+            # Create database instance and export
+            db = Database()
+            filename = f"{export_folder}/duplicate_names.csv"
+            
+            success = db.export_to_csv(filename)
+            
+            if success:
+                QMessageBox.information(
+                    self, 
+                    "Export Complete", 
+                    f"Export complete: duplicate_names.csv saved in {export_folder}"
+                )
+                logger.info(f"CSV exported successfully to {filename}")
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Export Failed", 
+                    "Failed to export CSV file. Please check the export folder and try again."
+                )
+                logger.error("CSV export failed")
+                
+        except Exception as e:
+            logger.error(f"Error during CSV export: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Export Error", 
+                f"Error during export: {str(e)}"
+            )
     
     def load_current_settings(self):
         """Load current settings into the dialog"""
